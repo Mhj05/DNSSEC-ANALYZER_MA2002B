@@ -1,0 +1,1744 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor DNSSEC — MA2002B · Tec de Monterrey</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --panel2: #1c2230;
+  --border: #2a3650;
+  --text: #e6eaf2;
+  --muted: #8b97b3;
+  --accent: #5b8def;
+  --ok: #36b37e;
+  --warn: #ffab00;
+  --bad: #f25c54;
+  --none: #5a6478;
+  --ok-bg: rgba(54,179,126,.12);
+  --warn-bg: rgba(255,171,0,.12);
+  --bad-bg: rgba(242,92,84,.12);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+a{color:var(--accent)}
+
+/* ── Layout ── */
+.app{display:flex;min-height:100vh}
+.sidebar{width:220px;background:var(--panel);border-right:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column}
+.sidebar-logo{padding:20px 18px 14px;border-bottom:1px solid var(--border)}
+.sidebar-logo h1{font-size:15px;font-weight:700;color:var(--text)}
+.sidebar-logo p{font-size:11px;color:var(--muted);margin-top:2px}
+.nav{padding:12px 10px;flex:1}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:13px;color:var(--muted);transition:all .15s;margin-bottom:2px;border:none;background:none;width:100%;text-align:left}
+.nav-item:hover{background:var(--panel2);color:var(--text)}
+.nav-item.active{background:rgba(91,141,239,.15);color:var(--accent)}
+.nav-item svg{width:16px;height:16px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.sidebar-footer{padding:12px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)}
+
+.main{flex:1;overflow-x:hidden;display:flex;flex-direction:column}
+.topbar{padding:16px 28px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;background:var(--panel);position:sticky;top:0;z-index:10}
+.topbar h2{font-size:16px;font-weight:600;flex:1}
+.topbar-meta{font-size:12px;color:var(--muted)}
+.content{padding:24px 28px 60px;flex:1}
+
+/* ── Panels ── */
+.view{display:none}
+.view.active{display:block}
+
+/* ── Search bar ── */
+.search-wrap{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px 22px;margin-bottom:22px}
+.search-row{display:flex;gap:10px;align-items:center}
+.search-row input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:14px;outline:none;transition:border .15s}
+.search-row input:focus{border-color:var(--accent)}
+.search-row input::placeholder{color:var(--muted)}
+.btn{padding:10px 18px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all .15s;white-space:nowrap}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#4a7de0}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
+.btn-ok{background:var(--ok-bg);color:var(--ok);border:1px solid rgba(54,179,126,.3)}
+.btn-ok:hover{background:rgba(54,179,126,.2)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.chip{padding:3px 10px;border-radius:99px;font-size:11px;cursor:pointer;background:var(--panel2);border:1px solid var(--border);color:var(--muted);transition:all .15s}
+.chip:hover{border-color:var(--accent);color:var(--accent)}
+.chip.new-badge::after{content:'NEW';font-size:9px;background:var(--warn);color:#000;border-radius:3px;padding:1px 4px;margin-left:5px;font-weight:700}
+
+/* ── Cards grid ── */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:22px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
+.card .num{font-size:30px;font-weight:700}
+.card .lbl{color:var(--muted);font-size:12px;margin-top:4px}
+.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-bad{color:var(--bad)}.c-accent{color:var(--accent)}
+
+/* ── Pill badges ── */
+.pill{padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;white-space:nowrap}
+.pill-ok{background:var(--ok-bg);color:var(--ok)}
+.pill-warn{background:var(--warn-bg);color:var(--warn)}
+.pill-bad{background:var(--bad-bg);color:var(--bad)}
+.pill-none{background:rgba(90,100,120,.2);color:var(--none)}
+
+/* ── Domain result card ── */
+.result-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:22px;margin-bottom:18px;animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.result-header{display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.domain-title{font-size:20px;font-weight:700;font-family:monospace}
+.status-badge{padding:5px 14px;border-radius:99px;font-size:12px;font-weight:700}
+.metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.metric-item{background:var(--panel2);border-radius:8px;padding:12px 14px}
+.metric-item .m-label{font-size:11px;color:var(--muted);margin-bottom:5px}
+.metric-item .m-val{font-size:14px;font-weight:600}
+.section-title{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px;border-bottom:1px solid var(--border);padding-bottom:8px}
+
+/* ── Chart cards ── */
+.charts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:22px}
+.chart-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
+.chart-card h3{font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px}
+.chart-wrap{position:relative;height:200px}
+.chart-legend{font-size:11px;color:var(--muted);margin-top:10px;display:flex;flex-direction:column;gap:4px}
+.chart-legend-row{display:flex;align-items:center;gap:6px}
+.legend-dot{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+
+/* ── Tables ── */
+.table-wrap{overflow-x:auto;border-radius:10px;border:1px solid var(--border);max-height:480px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:12px;background:var(--panel)}
+th{padding:9px 10px;border-bottom:1px solid var(--border);text-align:left;font-size:11px;font-weight:700;color:var(--muted);background:#1a2035;position:sticky;top:0;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--panel2)}
+.mono{font-family:monospace;font-size:11px}
+
+/* ── Trust tree ── */
+.tree-container{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:auto;margin-bottom:18px}
+.tree-legend{display:flex;flex-wrap:wrap;gap:14px;padding:12px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)}
+.tree-legend span{display:flex;align-items:center;gap:6px}
+.dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+.link{fill:none;stroke:#2a3650;stroke-width:1.5px}
+.node circle{stroke-width:1.5px;cursor:pointer}
+.node text{font-size:11px;fill:var(--text);font-family:'Segoe UI',system-ui}
+
+/* ── Loading / Error ── */
+.loading-box{padding:40px;text-align:center;color:var(--muted)}
+.loading-box .spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-box{background:var(--bad-bg);border:1px solid rgba(242,92,84,.3);border-radius:8px;padding:12px 16px;font-size:13px;color:var(--bad);margin-bottom:14px}
+.info-box{background:rgba(91,141,239,.1);border:1px solid rgba(91,141,239,.25);border-radius:8px;padding:12px 16px;font-size:13px;color:var(--accent);margin-bottom:14px}
+.warn-box{background:var(--warn-bg);border:1px solid rgba(255,171,0,.3);border-radius:8px;padding:12px 16px;font-size:13px;color:var(--warn);margin-bottom:14px}
+
+/* ── Toolbar row ── */
+.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.toolbar h3{font-size:15px;font-weight:700;flex:1}
+.search-inline{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;width:220px;outline:none}
+.search-inline:focus{border-color:var(--accent)}
+
+/* ── RRSIG detail table ── */
+.detail-section{margin-top:16px}
+.mini-table{width:100%;font-size:12px;border-collapse:collapse}
+.mini-table td,.mini-table th{padding:6px 10px;border-bottom:1px solid var(--border)}
+.mini-table th{background:var(--panel2);font-weight:600;color:var(--muted);font-size:11px}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* ── Tooltip ── */
+.tooltip-trigger{position:relative;display:inline-block;cursor:help}
+.tooltip-trigger:hover::after{content:attr(data-tip);position:absolute;bottom:125%;left:50%;transform:translateX(-50%);background:#1a2035;color:var(--text);font-size:11px;padding:4px 8px;border-radius:5px;white-space:nowrap;border:1px solid var(--border);z-index:99;pointer-events:none}
+</style>
+</head>
+<body>
+
+<div class="app">
+<!-- ══ SIDEBAR ══ -->
+<div class="sidebar">
+  <div class="sidebar-logo">
+    <h1>Monitor DNSSEC</h1>
+    <p>MA2002B · Tec de Monterrey</p>
+  </div>
+  <nav class="nav">
+    <button class="nav-item active" onclick="showView('lookup',this)">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      Consulta de dominio
+    </button>
+    <button class="nav-item" onclick="showView('dashboard',this)">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard global
+    </button>
+    <button class="nav-item" onclick="showView('tree',this)">
+      <svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20M12 2 2 7M12 2l10 5M12 22 2 17M12 22l10-5"/></svg>
+      Árbol de confianza
+    </button>
+    <button class="nav-item" onclick="showView('tabla',this)">
+      <svg viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/></svg>
+      Tabla de métricas
+    </button>
+    <button class="nav-item" onclick="showView('exportar',this)">
+      <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Exportar CSV
+    </button>
+  </nav>
+  <div class="sidebar-footer">
+    RFC 4033-4035 · 5155 · 6840 · 8624<br>
+    Resolver: 8.8.8.8 · A00841920
+  </div>
+</div>
+
+<!-- ══ MAIN ══ -->
+<div class="main">
+<div class="topbar">
+  <h2 id="topbar-title">Consulta de dominio</h2>
+  <span class="topbar-meta" id="topbar-meta">Generado: 2026-06-12 UTC</span>
+</div>
+
+<div class="content">
+
+<!-- ════════════════════════════════════════════
+     VIEW 1: CONSULTA DE DOMINIO
+════════════════════════════════════════════ -->
+<div class="view active" id="view-lookup">
+  <div class="search-wrap">
+    <div class="search-row">
+      <input type="text" id="domain-input" placeholder="Ej: cloudflare.com, unam.mx, sat.gob.mx …" autocomplete="off"/>
+      <button class="btn btn-primary" id="btn-analyze" onclick="analyzeDomain()">Analizar</button>
+    </div>
+    <div class="chips" id="recent-chips"></div>
+  </div>
+
+  <div id="lookup-result">
+    <div class="loading-box" style="padding:50px">
+      <div style="font-size:40px;margin-bottom:12px;color:var(--muted)">[ ? ]</div>
+      <p style="font-size:14px;color:var(--muted)">Ingresa cualquier dominio para analizar su estado DNSSEC en tiempo real.</p>
+      <p style="font-size:12px;color:var(--none);margin-top:6px">Los dominios del estudio se resuelven al instante · Cualquier otro dominio se analiza en vivo vía DNS-over-HTTPS, con el mismo método (RFC 4033-4035, 8624)</p>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     VIEW 2: DASHBOARD GLOBAL
+════════════════════════════════════════════ -->
+<div class="view" id="view-dashboard">
+  <div class="cards" id="summary-cards"></div>
+  <div class="charts-grid">
+    <div class="chart-card">
+      <h3>Cadena DS íntegra</h3>
+      <div class="chart-wrap"><canvas id="c-ds"></canvas></div>
+      <div class="chart-legend" id="leg-ds"></div>
+    </div>
+    <div class="chart-card">
+      <h3>Dominios con DNSKEY</h3>
+      <div class="chart-wrap"><canvas id="c-dnskey"></canvas></div>
+      <div class="chart-legend" id="leg-dnskey"></div>
+    </div>
+    <div class="chart-card">
+      <h3>Estado de firmas RRSIG</h3>
+      <div class="chart-wrap"><canvas id="c-rrsig"></canvas></div>
+      <div class="chart-legend" id="leg-rrsig"></div>
+    </div>
+    <div class="chart-card">
+      <h3>NSEC / NSEC3</h3>
+      <div class="chart-wrap"><canvas id="c-nsec"></canvas></div>
+      <div class="chart-legend" id="leg-nsec"></div>
+    </div>
+    <div class="chart-card">
+      <h3>Algoritmos RFC 8624</h3>
+      <div class="chart-wrap"><canvas id="c-alg"></canvas></div>
+      <div class="chart-legend" id="leg-alg"></div>
+    </div>
+    <div class="chart-card">
+      <h3>Distribución de algoritmos DNSKEY</h3>
+      <div class="chart-wrap" style="height:160px"><canvas id="c-algnames"></canvas></div>
+      <div class="chart-legend" id="leg-algnames"></div>
+    </div>
+  </div>
+
+  <!-- ── Sector breakdown ── -->
+  <div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:22px">
+    <h3 style="font-size:14px;font-weight:700;margin-bottom:14px">Métricas por sector</h3>
+    <div id="sector-stats-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px"></div>
+  </div>
+  <div class="charts-grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+    <div class="chart-card">
+      <h3>DNSSEC por sector — Cadena DS íntegra</h3>
+      <div class="chart-wrap" style="height:220px"><canvas id="c-sector-ds"></canvas></div>
+      <div class="chart-legend" id="leg-sector-ds"></div>
+    </div>
+    <div class="chart-card">
+      <h3>Total de dominios por sector</h3>
+      <div class="chart-wrap" style="height:220px"><canvas id="c-sector-total"></canvas></div>
+      <div class="chart-legend" id="leg-sector-total"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     VIEW 3: ÁRBOL DE CONFIANZA
+════════════════════════════════════════════ -->
+<div class="view" id="view-tree">
+  <div class="info-box">Árbol de cadena de confianza raíz → mx. → dominios seleccionados. Elige los dominios que quieres visualizar y haz clic en <strong>Actualizar árbol</strong>.</div>
+
+  <!-- Domain selector panel -->
+  <div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="font-size:13px;font-weight:700;flex:1">Dominios a mostrar en el árbol</span>
+      <input type="text" id="tree-domain-search" placeholder="Filtrar dominio…" oninput="filterTreeDomains()"
+        style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;width:200px;outline:none"/>
+      <select id="tree-sector-filter" onchange="filterTreeDomains()"
+        style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">
+        <option value="all">Todos los sectores</option>
+        <option value="Gobierno">Gobierno</option>
+        <option value="Educación">Educación</option>
+        <option value="Industria">Industria</option>
+        <option value="Comercio">Comercio</option>
+        <option value="Finanzas">Finanzas</option>
+        <option value="Telecomunicaciones">Telecomunicaciones</option>
+        <option value="Organizaciones civiles">Organizaciones civiles</option>
+      </select>
+      <select id="tree-status-filter" onchange="filterTreeDomains()"
+        style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">
+        <option value="all">Todos los estados</option>
+        <option value="ok">DNSSEC OK</option>
+        <option value="partial">Cadena incompleta</option>
+        <option value="none">Sin DNSSEC</option>
+      </select>
+      <button class="btn btn-secondary" onclick="selectAllTreeDomains(true)" style="font-size:11px;padding:6px 10px">Seleccionar todo</button>
+      <button class="btn btn-secondary" onclick="selectAllTreeDomains(false)" style="font-size:11px;padding:6px 10px">Limpiar</button>
+      <button class="btn btn-primary" onclick="rebuildTrustTree()" style="padding:8px 16px">Actualizar árbol</button>
+    </div>
+    <div id="tree-domain-list" style="display:flex;flex-wrap:wrap;gap:6px;max-height:140px;overflow-y:auto;padding:4px 2px"></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px" id="tree-selection-count"></div>
+  </div>
+
+  <div class="tree-container" id="tree-container">
+    <svg id="trust-tree-svg" style="display:block"></svg>
+  </div>
+  <div class="tree-legend">
+    <span><span class="dot" style="background:var(--accent)"></span>Raíz / ancla de confianza (.)</span>
+    <span><span class="dot" style="background:var(--ok)"></span>DNSSEC OK — cadena íntegra</span>
+    <span><span class="dot" style="background:var(--warn)"></span>DNSKEY sin DS — cadena incompleta</span>
+    <span><span class="dot" style="background:var(--none)"></span>Sin DNSSEC</span>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     VIEW 4: TABLA DE MÉTRICAS
+════════════════════════════════════════════ -->
+<div class="view" id="view-tabla">
+  <div class="toolbar">
+    <h3>Métricas por dominio <span id="domain-count" style="font-size:13px;font-weight:400;color:var(--muted)"></span></h3>
+    <input type="text" class="search-inline" id="table-search" placeholder="Filtrar dominio…" oninput="filterTable()"/>
+    <select id="table-filter" onchange="filterTable()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">
+      <option value="all">Todos</option>
+      <option value="ok">DNSSEC OK</option>
+      <option value="partial">Parcial</option>
+      <option value="none">Sin DNSSEC</option>
+      <option value="new">Nuevos</option>
+    </select>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Dominio</th>
+          <th>Estado</th>
+          <th>DNSKEY</th>
+          <th>KSK</th>
+          <th>ZSK</th>
+          <th>Algoritmo</th>
+          <th>RFC 8624</th>
+          <th>RRSIG</th>
+          <th>Exp. RRSIG</th>
+          <th>DS / Cadena</th>
+          <th>Digest</th>
+          <th>NSEC tipo</th>
+          <th>TTL DNSKEY</th>
+          <th>AD Flag</th>
+          <th>Origen</th>
+        </tr>
+      </thead>
+      <tbody id="main-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     VIEW 5: EXPORTAR CSV
+════════════════════════════════════════════ -->
+<div class="view" id="view-exportar">
+  <div class="info-box">Descarga los datos en formato CSV para análisis en Excel, Python, R u otras herramientas.</div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+
+    <div class="chart-card">
+      <h3>Métricas globales</h3>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 14px">Resumen con totales por categoría: DNSKEY, RRSIG, DS, NSEC, algoritmos.</p>
+      <button class="btn btn-ok" onclick="exportCSV('summary')">Descargar metricas_globales.csv</button>
+    </div>
+
+    <div class="chart-card">
+      <h3>Registros DNSKEY</h3>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 14px">Todos los dominios con tipo de clave, algoritmo, key_tag, TTL y cumplimiento RFC 8624.</p>
+      <button class="btn btn-ok" onclick="exportCSV('dnskey')">Descargar dnskey.csv</button>
+    </div>
+
+    <div class="chart-card">
+      <h3>Registros RRSIG</h3>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 14px">Firmas digitales: algoritmo, firmante, fechas de inicio y expiración, estado y AD flag.</p>
+      <button class="btn btn-ok" onclick="exportCSV('rrsig')">Descargar rrsig.csv</button>
+    </div>
+
+    <div class="chart-card">
+      <h3>Registros DS</h3>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 14px">Cadena de confianza: key_tag, algoritmo, tipo de digest, validez de cadena y notas RFC.</p>
+      <button class="btn btn-ok" onclick="exportCSV('ds')">Descargar ds_cadena.csv</button>
+    </div>
+
+    <div class="chart-card">
+      <h3>Registros NSEC/NSEC3</h3>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 14px">Tipo de denial-of-existence, TTL y flags de uso para cada dominio.</p>
+      <button class="btn btn-ok" onclick="exportCSV('nsec')">Descargar nsec.csv</button>
+    </div>
+
+    <div class="chart-card">
+      <h3>Cadena de confianza</h3>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 14px">Árbol completo padre→hijo con estado de DNSKEY, DS y validez de cadena.</p>
+      <button class="btn btn-ok" onclick="exportCSV('tree')">Descargar cadena_confianza.csv</button>
+    </div>
+
+    <div class="chart-card" style="border-color:rgba(91,141,239,.4)">
+      <h3>Exportación completa</h3>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 14px">Todos los CSV anteriores combinados en uno solo, separados por sección.</p>
+      <button class="btn btn-primary" onclick="exportCSV('all')">Descargar dnssec_completo.csv</button>
+    </div>
+
+  </div>
+</div>
+
+</div><!-- /content -->
+</div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ══════════════════════════════════════════════════
+     TOOLTIP DIV (for tree)
+══════════════════════════════════════════════════ -->
+<div id="tooltip" style="position:fixed;display:none;background:#1a2035;border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text);z-index:999;pointer-events:none;max-width:240px"></div>
+
+<script>
+// ══════════════════════════════════════════════════
+// DATA — Real data extracted from resultados_dnssec.xlsx
+// ══════════════════════════════════════════════════
+
+const SUMMARY = {
+  total: 99, with_dnskey: 10, with_rrsig: 12, ds_chain_valid: 9,
+  use_nsec3: 9, use_nsec_only: 3, rrsig_expired: 0,
+  alg_authorized: 22, alg_deprecated: 0
+};
+
+// Full domain records from Excel
+const DNSKEY_DATA = [
+  {domain:'unam.mx',key_tag:42326,tipo:'ZSK',algoritmo:'ECDSAP256SHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:7200},
+  {domain:'unam.mx',key_tag:54058,tipo:'KSK (SEP)',algoritmo:'ECDSAP256SHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:7200},
+  {domain:'gob.mx',key_tag:43850,tipo:'KSK (SEP)',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:11834},
+  {domain:'gob.mx',key_tag:26638,tipo:'ZSK',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:11834},
+  {domain:'ipn.mx',key_tag:65049,tipo:'KSK (SEP)',algoritmo:'RSASHA512',estado_alg:'RECOMMENDED',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:21600},
+  {domain:'ipn.mx',key_tag:57728,tipo:'ZSK',algoritmo:'RSASHA512',estado_alg:'RECOMMENDED',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:21600},
+  {domain:'asecoahuila.gob.mx',key_tag:14749,tipo:'KSK (SEP)',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:3600},
+  {domain:'asecoahuila.gob.mx',key_tag:9729,tipo:'ZSK',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:3600},
+  {domain:'registry.mx',key_tag:53782,tipo:'KSK (SEP)',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:300},
+  {domain:'registry.mx',key_tag:865,tipo:'ZSK',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:300},
+  {domain:'registry.mx',key_tag:13306,tipo:'ZSK',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:300},
+  {domain:'flacso.edu.mx',key_tag:24978,tipo:'ZSK',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:30},
+  {domain:'flacso.edu.mx',key_tag:9340,tipo:'KSK (SEP)',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:30},
+  {domain:'sinaloa.gob.mx',key_tag:34505,tipo:'ZSK',algoritmo:'ECDSAP256SHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:308},
+  {domain:'sinaloa.gob.mx',key_tag:2371,tipo:'KSK (SEP)',algoritmo:'ECDSAP256SHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:308},
+  {domain:'chihuahua.gob.mx',key_tag:5568,tipo:'ZSK',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:300},
+  {domain:'chihuahua.gob.mx',key_tag:4660,tipo:'KSK (SEP)',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:300},
+  {domain:'jalisco.gob.mx',key_tag:55574,tipo:'KSK (SEP)',algoritmo:'ECDSAP256SHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:1609},
+  {domain:'jalisco.gob.mx',key_tag:50902,tipo:'ZSK',algoritmo:'ECDSAP256SHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:1609},
+  {domain:'jalisco.gob.mx',key_tag:51398,tipo:'ZSK',algoritmo:'ECDSAP256SHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:1609},
+  {domain:'carteleradeteatro.mx',key_tag:2989,tipo:'KSK (SEP)',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:3600},
+  {domain:'carteleradeteatro.mx',key_tag:35286,tipo:'ZSK',algoritmo:'RSASHA256',estado_alg:'MUST',estado_clave:'VÁLIDA',rfc_compliant:true,ttl:3600},
+];
+
+const RRSIG_DATA = [
+  {domain:'unam.mx',tipo:'A',key_tag:42326,algoritmo:'ECDSAP256SHA256',firmante:'unam.mx.',inicio:'2026-06-12 16:21:26 UTC',expiracion:'2027-02-25 12:00:00 UTC',estado:'VÁLIDA',ad_flag:true},
+  {domain:'gob.mx',tipo:'A',key_tag:26638,algoritmo:'RSASHA256',firmante:'gob.mx.',inicio:'2026-06-11 00:00:00 UTC',expiracion:'2026-07-11 00:00:00 UTC',estado:'VÁLIDA',ad_flag:true},
+  {domain:'ipn.mx',tipo:'A',key_tag:57728,algoritmo:'RSASHA512',firmante:'ipn.mx.',inicio:'2026-06-11 07:53:35 UTC',expiracion:'2026-06-18 08:53:35 UTC',estado:'VÁLIDA',ad_flag:false},
+  {domain:'asecoahuila.gob.mx',tipo:'A',key_tag:9729,algoritmo:'RSASHA256',firmante:'asecoahuila.gob.mx.',inicio:'2026-06-05 17:00:13 UTC',expiracion:'2026-07-05 18:00:13 UTC',estado:'VÁLIDA',ad_flag:false},
+  {domain:'registry.mx',tipo:'A',key_tag:865,algoritmo:'RSASHA256',firmante:'registry.mx.',inicio:'2026-05-21 16:05:24 UTC',expiracion:'2026-07-21 23:59:59 UTC',estado:'VÁLIDA',ad_flag:false},
+  {domain:'flacso.edu.mx',tipo:'SOA',key_tag:24978,algoritmo:'RSASHA256',firmante:'flacso.edu.mx.',inicio:'2026-06-10 14:40:47 UTC',expiracion:'2026-07-10 15:40:47 UTC',estado:'VÁLIDA',ad_flag:true},
+  {domain:'sinaloa.gob.mx',tipo:'A',key_tag:34505,algoritmo:'ECDSAP256SHA256',firmante:'sinaloa.gob.mx.',inicio:'2026-06-11 19:58:55 UTC',expiracion:'2026-06-13 21:58:55 UTC',estado:'VÁLIDA',ad_flag:false},
+  {domain:'chihuahua.gob.mx',tipo:'A',key_tag:5568,algoritmo:'RSASHA256',firmante:'chihuahua.gob.mx.',inicio:'2026-06-12 18:06:06 UTC',expiracion:'2026-07-12 18:06:06 UTC',estado:'VÁLIDA',ad_flag:true},
+  {domain:'jalisco.gob.mx',tipo:'A',key_tag:51398,algoritmo:'ECDSAP256SHA256',firmante:'jalisco.gob.mx.',inicio:'2026-06-12 19:58:19 UTC',expiracion:'2026-06-12 21:59:19 UTC',estado:'VÁLIDA',ad_flag:true},
+  {domain:'carteleradeteatro.mx',tipo:'A',key_tag:35286,algoritmo:'RSASHA256',firmante:'carteleradeteatro.mx.',inicio:'2026-06-06 17:01:30 UTC',expiracion:'2026-07-06 18:01:30 UTC',estado:'VÁLIDA',ad_flag:true},
+  {domain:'infonavit.org.mx',tipo:'A',key_tag:62821,algoritmo:'RSASHA256',firmante:'infonavit.org.mx.',inicio:'2026-06-12 00:36:48 UTC',expiracion:'2026-06-16 00:59:30 UTC',estado:'VÁLIDA',ad_flag:true},
+  {domain:'sep.gob.mx',tipo:'A',key_tag:57493,algoritmo:'RSASHA256',firmante:'sep.gob.mx.',inicio:'2026-06-12 15:39:38 UTC',expiracion:'2026-06-16 15:56:10 UTC',estado:'VÁLIDA',ad_flag:false},
+];
+
+const DS_DATA = [
+  {domain:'unam.mx',key_tag:54058,algoritmo:'ECDSAP256SHA256',digest:'SHA-256 (RFC 4509)',cadena_valida:true,digest_deprecado:false,cadena_integra:true},
+  {domain:'gob.mx',key_tag:43850,algoritmo:'RSASHA256',digest:'SHA-256 (RFC 4509)',cadena_valida:true,digest_deprecado:false,cadena_integra:true},
+  {domain:'asecoahuila.gob.mx',key_tag:14749,algoritmo:'RSASHA256',digest:'SHA-256 (RFC 4509)',cadena_valida:true,digest_deprecado:false,cadena_integra:true},
+  {domain:'registry.mx',key_tag:53782,algoritmo:'RSASHA256',digest:'SHA-256 (RFC 4509)',cadena_valida:true,digest_deprecado:false,cadena_integra:true},
+  {domain:'flacso.edu.mx',key_tag:9340,algoritmo:'RSASHA256',digest:'SHA-256 (RFC 4509)',cadena_valida:true,digest_deprecado:false,cadena_integra:true},
+  {domain:'sinaloa.gob.mx',key_tag:2371,algoritmo:'ECDSAP256SHA256',digest:'SHA-256 (RFC 4509)',cadena_valida:true,digest_deprecado:false,cadena_integra:true},
+  {domain:'chihuahua.gob.mx',key_tag:4660,algoritmo:'RSASHA256',digest:'SHA-1 (deprecado, RFC 3658)',cadena_valida:true,digest_deprecado:true,cadena_integra:true},
+  {domain:'jalisco.gob.mx',key_tag:55574,algoritmo:'ECDSAP256SHA256',digest:'SHA-256 (RFC 4509)',cadena_valida:true,digest_deprecado:false,cadena_integra:true},
+  {domain:'carteleradeteatro.mx',key_tag:2989,algoritmo:'RSASHA256',digest:'SHA-256 (RFC 4509)',cadena_valida:true,digest_deprecado:false,cadena_integra:true},
+  {domain:'infonavit.org.mx',key_tag:51280,algoritmo:'RSASHA256',digest:'SHA-256 (RFC 4509)',cadena_valida:false,digest_deprecado:false,cadena_integra:false},
+  {domain:'infonavit.org.mx',key_tag:42511,algoritmo:'RSASHA256',digest:'SHA-1 (deprecado, RFC 3658)',cadena_valida:false,digest_deprecado:true,cadena_integra:false},
+];
+
+const NSEC_DATA = [
+  {domain:'unam.mx',tipo:'NSEC',usa_nsec3:false,usa_nsec:true,encontrado:true,ttl:300},
+  {domain:'gob.mx',tipo:'NSEC3PARAM+NSEC3',usa_nsec3:true,usa_nsec:false,encontrado:true,ttl:21600},
+  {domain:'ipn.mx',tipo:'NSEC3PARAM+NSEC3',usa_nsec3:true,usa_nsec:false,encontrado:true,ttl:3600},
+  {domain:'asecoahuila.gob.mx',tipo:'NSEC3PARAM+NSEC3',usa_nsec3:true,usa_nsec:false,encontrado:true,ttl:0},
+  {domain:'registry.mx',tipo:'NSEC3PARAM+NSEC3',usa_nsec3:true,usa_nsec:false,encontrado:true,ttl:0},
+  {domain:'flacso.edu.mx',tipo:'NSEC3PARAM+NSEC3',usa_nsec3:true,usa_nsec:false,encontrado:true,ttl:0},
+  {domain:'sinaloa.gob.mx',tipo:'NSEC',usa_nsec3:false,usa_nsec:true,encontrado:true,ttl:1800},
+  {domain:'chihuahua.gob.mx',tipo:'NSEC3PARAM+NSEC3',usa_nsec3:true,usa_nsec:false,encontrado:true,ttl:0},
+  {domain:'jalisco.gob.mx',tipo:'NSEC3PARAM+NSEC3',usa_nsec3:true,usa_nsec:false,encontrado:true,ttl:0},
+  {domain:'carteleradeteatro.mx',tipo:'NSEC3PARAM+NSEC3',usa_nsec3:true,usa_nsec:false,encontrado:true,ttl:0},
+];
+
+const TREE_DATA = [
+  {padre:'.',hijo:'mx.',tiene_dnskey:true,tiene_ds:true,cadena_ds_valida:true,ksk:1,zsk:1},
+  {padre:'mx.',hijo:'uam.mx.',tiene_dnskey:false,tiene_ds:false,cadena_ds_valida:false,ksk:0,zsk:0},
+  {padre:'mx.',hijo:'ine.mx.',tiene_dnskey:false,tiene_ds:false,cadena_ds_valida:false,ksk:0,zsk:0},
+  {padre:'mx.',hijo:'gob.mx.',tiene_dnskey:true,tiene_ds:true,cadena_ds_valida:true,ksk:1,zsk:1},
+  {padre:'mx.',hijo:'tec.mx.',tiene_dnskey:false,tiene_ds:false,cadena_ds_valida:false,ksk:0,zsk:0},
+  {padre:'mx.',hijo:'ipn.mx.',tiene_dnskey:true,tiene_ds:false,cadena_ds_valida:false,ksk:1,zsk:1},
+  {padre:'mx.',hijo:'unam.mx.',tiene_dnskey:true,tiene_ds:true,cadena_ds_valida:true,ksk:1,zsk:1},
+  {padre:'gob.mx.',hijo:'sat.gob.mx.',tiene_dnskey:false,tiene_ds:false,cadena_ds_valida:false,ksk:0,zsk:0},
+];
+
+// Clasificación sectorial de los 99 dominios del estudio
+const SECTOR_MAP = {
+  'unam.mx':'Educación','gob.mx':'Gobierno','sat.gob.mx':'Gobierno','ine.mx':'Gobierno',
+  'ipn.mx':'Educación','tec.mx':'Educación','uam.mx':'Educación','imss.gob.mx':'Gobierno',
+  'condusef.gob.mx':'Gobierno','banxico.org.mx':'Finanzas','asecoahuila.gob.mx':'Gobierno',
+  'registry.mx':'Telecomunicaciones','flacso.edu.mx':'Educación','sinaloa.gob.mx':'Gobierno',
+  'tramites.nayarit.gob.mx':'Gobierno','hacienda-nayarit.gob.mx':'Gobierno','sgg.nayarit.gob.mx':'Gobierno',
+  'oaxaca.gob.mx':'Gobierno','chihuahua.gob.mx':'Gobierno','saludsinaloa.gob.mx':'Gobierno',
+  'elcolegiodesinaloa.gob.mx':'Educación','cdmx.gob.mx':'Gobierno','jalisco.gob.mx':'Gobierno',
+  'nuestrocine.mx':'Comercio','inba.gob.mx':'Gobierno','udem.edu.mx':'Educación',
+  'carteleradeteatro.mx':'Comercio','infonavit.org.mx':'Gobierno','cruzrojamexicana.org.mx':'Organizaciones civiles',
+  'hchr.org.mx':'Organizaciones civiles','amazon.com.mx':'Comercio','mercadolibre.com.mx':'Comercio',
+  'sep.gob.mx':'Gobierno','walmart.gob.mx':'Comercio','eluniversal.com.mx':'Comercio',
+  'tamaulipas.gob.mx':'Gobierno','veracruz.gob.mx':'Gobierno','morelos.gob.mx':'Gobierno',
+  'queretaro.gob.mx':'Gobierno','zacatecas.gob.mx':'Gobierno','pinterest.mx':'Comercio',
+  'youtube.mx':'Comercio','christusmuguerza.com.mx':'Comercio','saltillo.tecnm.mx':'Educación',
+  'lasalle.mx':'Educación','nl.gob.mx':'Gobierno','banamex.com.mx':'Finanzas','bbva.mx':'Finanzas',
+  'liverpool.com.mx':'Comercio','bancoazteca.com.mx':'Finanzas','bancocomercio.com.mx':'Finanzas',
+  'issste.gob.mx':'Gobierno','cemex.com.mx':'Industria','femsa.com.mx':'Industria',
+  'alfacorporativo.com.mx':'Industria','vitro.com.mx':'Industria','gruma.com.mx':'Industria',
+  'bimbo.com.mx':'Industria','nemak.com.mx':'Industria','ternium.com.mx':'Industria',
+  'metalsa.com.mx':'Industria','deacero.com.mx':'Industria','chedraui.com.mx':'Comercio',
+  'soriana.com.mx':'Comercio','costco.com.mx':'Comercio','homedepot.com.mx':'Comercio',
+  'coppel.com.mx':'Comercio','elektra.com.mx':'Comercio','palaciodehierro.com.mx':'Comercio',
+  'sanborns.com.mx':'Comercio','santander.com.mx':'Finanzas','banorte.com':'Finanzas',
+  'hsbc.com.mx':'Finanzas','scotiabank.com.mx':'Finanzas','inbursa.com.mx':'Finanzas',
+  'banregio.com':'Finanzas','afirme.com':'Finanzas','banbajio.com':'Finanzas','nu.com.mx':'Finanzas',
+  'klar.mx':'Finanzas','izzi.mx':'Telecomunicaciones','totalplay.com.mx':'Telecomunicaciones',
+  'megacable.com.mx':'Telecomunicaciones','att.com.mx':'Telecomunicaciones','movistar.com.mx':'Telecomunicaciones',
+  'ait.com.mx':'Telecomunicaciones','redcompartida.mx':'Telecomunicaciones',
+  'unicef.org.mx':'Organizaciones civiles','worldvisionmexico.org.mx':'Organizaciones civiles',
+  'greenpeace.org.mx':'Organizaciones civiles','caritas.org.mx':'Organizaciones civiles',
+  'amanc.org':'Organizaciones civiles','fundacionunam.org.mx':'Organizaciones civiles',
+  'savechildren.mx':'Organizaciones civiles','techo.org.mx':'Organizaciones civiles',
+  'fundacionbbva.mx':'Organizaciones civiles','proceso.com.mx':'Comercio','expansion.mx':'Comercio',
+  'xataka.com.mx':'Comercio'
+};
+const SECTOR_ORDER = ['Gobierno','Educación','Industria','Comercio','Finanzas','Telecomunicaciones','Organizaciones civiles'];
+function getSector(domain) { return SECTOR_MAP[domain] || 'Otro / nuevo'; }
+
+
+
+// Build lookup from DNSKEY data
+const dnskey_domains = new Set(DNSKEY_DATA.map(d=>d.domain));
+const rrsig_domains = new Set(RRSIG_DATA.map(d=>d.domain));
+const ds_ok_domains = new Set(DS_DATA.filter(d=>d.cadena_integra).map(d=>d.domain));
+const nsec_map = {};
+NSEC_DATA.forEach(n=>{ nsec_map[n.domain]=n; });
+
+// All 99 domains from cripto_reto.py
+const ALL_DOMAINS_LIST = [
+  'unam.mx','gob.mx','sat.gob.mx','ine.mx','ipn.mx','tec.mx','uam.mx','imss.gob.mx',
+  'condusef.gob.mx','banxico.org.mx','asecoahuila.gob.mx','registry.mx','flacso.edu.mx',
+  'sinaloa.gob.mx','tramites.nayarit.gob.mx','hacienda-nayarit.gob.mx','sgg.nayarit.gob.mx',
+  'oaxaca.gob.mx','chihuahua.gob.mx','saludsinaloa.gob.mx','elcolegiodesinaloa.gob.mx',
+  'cdmx.gob.mx','jalisco.gob.mx','nuestrocine.mx','inba.gob.mx','udem.edu.mx',
+  'carteleradeteatro.mx','infonavit.org.mx','cruzrojamexicana.org.mx','hchr.org.mx',
+  'amazon.com.mx','mercadolibre.com.mx','sep.gob.mx','walmart.gob.mx','eluniversal.com.mx',
+  'tamaulipas.gob.mx','veracruz.gob.mx','morelos.gob.mx','queretaro.gob.mx','zacatecas.gob.mx',
+  'pinterest.mx','youtube.mx','christusmuguerza.com.mx','saltillo.tecnm.mx','lasalle.mx',
+  'nl.gob.mx','banamex.com.mx','bbva.mx','liverpool.com.mx','bancoazteca.com.mx',
+  'bancocomercio.com.mx','issste.gob.mx','cemex.com.mx','femsa.com.mx','alfacorporativo.com.mx',
+  'vitro.com.mx','gruma.com.mx','bimbo.com.mx','nemak.com.mx','ternium.com.mx',
+  'metalsa.com.mx','deacero.com.mx','chedraui.com.mx','soriana.com.mx','costco.com.mx',
+  'homedepot.com.mx','coppel.com.mx','elektra.com.mx','palaciodehierro.com.mx','sanborns.com.mx',
+  'santander.com.mx','banorte.com','hsbc.com.mx','scotiabank.com.mx','inbursa.com.mx',
+  'banregio.com','afirme.com','banbajio.com','nu.com.mx','klar.mx','izzi.mx',
+  'totalplay.com.mx','megacable.com.mx','att.com.mx','movistar.com.mx','ait.com.mx',
+  'redcompartida.mx','unicef.org.mx','worldvisionmexico.org.mx','greenpeace.org.mx',
+  'caritas.org.mx','amanc.org','fundacionunam.org.mx','savechildren.mx','techo.org.mx',
+  'fundacionbbva.mx','proceso.com.mx','expansion.mx','xataka.com.mx'
+];
+
+// Build per-domain summary
+function buildDomainSummary(domain, isNew=false) {
+  const dk = DNSKEY_DATA.filter(d=>d.domain===domain);
+  const rr = RRSIG_DATA.find(d=>d.domain===domain);
+  const dsRec = DS_DATA.filter(d=>d.domain===domain);
+  const nsec = nsec_map[domain];
+  const hasDNSKEY = dk.length > 0 && dk[0].estado_clave !== 'SIN DNSKEY';
+  const hasRRSIG = !!rr;
+  const hasDS = dsRec.length > 0 && dsRec.some(d=>d.cadena_valida);
+  const chainOk = ds_ok_domains.has(domain);
+  const ksk = dk.filter(d=>d.tipo==='KSK (SEP)').length;
+  const zsk = dk.filter(d=>d.tipo==='ZSK').length;
+  const alg = hasDNSKEY ? [...new Set(dk.map(d=>d.algoritmo))].join(', ') : '—';
+  const rfc8624 = hasDNSKEY ? dk.every(d=>d.rfc_compliant) : null;
+  const ttl = hasDNSKEY ? dk[0].ttl : null;
+  const adFlag = rr ? rr.ad_flag : null;
+  const rrsigExp = rr ? rr.expiracion : null;
+  const nsecTipo = nsec ? nsec.tipo : 'NINGUNO';
+  const digest = dsRec.length ? [...new Set(dsRec.map(d=>d.digest))].join(', ') : '—';
+
+  let status;
+  if (chainOk) status = 'ok';
+  else if (hasDNSKEY && !hasDS) status = 'partial';
+  else if (hasDNSKEY && hasDS && !chainOk) status = 'partial';
+  else status = 'none';
+
+  return { domain, hasDNSKEY, hasRRSIG, hasDS, chainOk, ksk, zsk, alg, rfc8624, ttl, adFlag,
+           rrsigExp, nsecTipo, digest, status, isNew,
+           rrsigData: rr, dnskeyData: dk, dsData: dsRec, nsecData: nsec };
+}
+
+// Build initial domain summaries
+const DOMAIN_SUMMARIES = {};
+ALL_DOMAINS_LIST.forEach(d => { DOMAIN_SUMMARIES[d] = buildDomainSummary(d, false); });
+
+// ══════════════════════════════════════════════════
+// PERSISTENT STORAGE — window.storage API
+// ══════════════════════════════════════════════════
+
+const STORAGE_KEY = 'dnssec_custom_domains';
+let customDomains = {}; // domain → summary object
+let recentSearches = [];
+
+async function loadCustomDomains() {
+  try {
+    const res = await window.storage.get(STORAGE_KEY);
+    if (res && res.value) {
+      const parsed = JSON.parse(res.value);
+      customDomains = parsed.domains || {};
+      recentSearches = parsed.recent || [];
+    }
+  } catch(e) { customDomains = {}; recentSearches = []; }
+  renderRecentChips();
+  renderTable();
+}
+
+async function saveCustomDomains() {
+  try {
+    await window.storage.set(STORAGE_KEY, JSON.stringify({ domains: customDomains, recent: recentSearches }));
+  } catch(e) { console.warn('Storage save failed', e); }
+}
+
+function addToRecent(domain) {
+  recentSearches = [domain, ...recentSearches.filter(r=>r!==domain)].slice(0,10);
+  renderRecentChips();
+  saveCustomDomains();
+}
+
+function renderRecentChips() {
+  const el = document.getElementById('recent-chips');
+  const all = [...recentSearches, ...Object.keys(customDomains).filter(d=>!recentSearches.includes(d))].slice(0,12);
+  if (!all.length) { el.innerHTML=''; return; }
+  el.innerHTML = all.map(d => {
+    const isNew = !!customDomains[d];
+    return `<span class="chip${isNew?' new-badge':''}" onclick="quickSearch('${d}')">${d}</span>`;
+  }).join('');
+}
+
+function quickSearch(d) {
+  document.getElementById('domain-input').value = d;
+  analyzeDomain();
+}
+
+// ══════════════════════════════════════════════════
+// LIVE DNSSEC ANALYSIS — DNS-over-HTTPS (mismo método que cripto_reto.py)
+// Sin IA: replica analyze_dnskey / analyze_rrsig / analyze_ds / analyze_nsec
+// ══════════════════════════════════════════════════
+
+const DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query';
+
+// Tabla de algoritmos RFC 8624 (idéntica a DNSSEC_ALGORITHMS en cripto_reto.py)
+const DNSSEC_ALGORITHMS_JS = {
+  1:['RSAMD5','MUST NOT'], 3:['DSA','MUST NOT'], 5:['RSASHA1','NOT RECOMMENDED'],
+  6:['DSA-NSEC3-SHA1','MUST NOT'], 7:['RSASHA1-NSEC3-SHA1','NOT RECOMMENDED'],
+  8:['RSASHA256','MUST'], 10:['RSASHA512','RECOMMENDED'], 12:['ECC-GOST','MUST NOT'],
+  13:['ECDSAP256SHA256','MUST'], 14:['ECDSAP384SHA384','RECOMMENDED'],
+  15:['ED25519','RECOMMENDED'], 16:['ED448','RECOMMENDED']
+};
+const DS_DIGEST_NAMES_JS = {
+  1:'SHA-1 (deprecado, RFC 3658)', 2:'SHA-256 (RFC 4509)',
+  3:'GOST R 34.11-94', 4:'SHA-384 (RFC 6605)'
+};
+
+async function dohQuery(name, type) {
+  const url = `${DOH_ENDPOINT}?name=${encodeURIComponent(name)}&type=${type}&do=1&cd=1`;
+  const resp = await fetch(url, { headers: { 'Accept': 'application/dns-json' } });
+  if (!resp.ok) throw new Error('DoH HTTP ' + resp.status);
+  return resp.json();
+}
+
+function b64ToBytes(b64) {
+  return Uint8Array.from(atob(b64.replace(/\s+/g,'')), c => c.charCodeAt(0));
+}
+
+function bytesToHex(bytes) {
+  return [...bytes].map(b => b.toString(16).padStart(2,'0')).join('').toUpperCase();
+}
+
+// Wire-format canónico del nombre (RFC 4034 §6.2): minúsculas, longitud-prefijo por etiqueta, byte 0 final
+function nameToWire(name) {
+  name = name.toLowerCase().replace(/\.+$/,'');
+  const labels = name.length ? name.split('.') : [];
+  const bytes = [];
+  for (const l of labels) {
+    bytes.push(l.length);
+    for (let i=0;i<l.length;i++) bytes.push(l.charCodeAt(i));
+  }
+  bytes.push(0);
+  return new Uint8Array(bytes);
+}
+
+// Key tag de una DNSKEY (RFC 4034 Apéndice B)
+function computeKeyTag(flags, protocol, algorithm, keyBytes) {
+  const rdata = new Uint8Array(4 + keyBytes.length);
+  rdata[0]=(flags>>8)&0xff; rdata[1]=flags&0xff; rdata[2]=protocol; rdata[3]=algorithm;
+  rdata.set(keyBytes,4);
+  if (algorithm === 1) return ((rdata[rdata.length-3]<<8)+rdata[rdata.length-2]) & 0xffff;
+  let ac = 0;
+  for (let i=0;i<rdata.length;i++) ac += (i & 1) ? rdata[i] : (rdata[i] << 8);
+  ac += (ac >> 16) & 0xffff;
+  return ac & 0xffff;
+}
+
+// DS esperado para una DNSKEY (RFC 4034 §5.1.4) — calculado vía SubtleCrypto
+async function computeDS(ownerName, flags, protocol, algorithm, keyBytes, digestType) {
+  const hashName = {1:'SHA-1',2:'SHA-256',4:'SHA-384'}[digestType];
+  if (!hashName) return null;
+  const nameWire = nameToWire(ownerName);
+  const rdata = new Uint8Array(4+keyBytes.length);
+  rdata[0]=(flags>>8)&0xff; rdata[1]=flags&0xff; rdata[2]=protocol; rdata[3]=algorithm;
+  rdata.set(keyBytes,4);
+  const data = new Uint8Array(nameWire.length + rdata.length);
+  data.set(nameWire,0); data.set(rdata,nameWire.length);
+  const digest = await crypto.subtle.digest(hashName, data);
+  return bytesToHex(new Uint8Array(digest));
+}
+
+function parseRRSIGText(rrsig) {
+  // formato: typeCovered algorithm labels originalTTL expiration inception keyTag signer ...
+  const parts = rrsig.split(' ');
+  const [typeCovered, algorithm, labels, originalTTL, expiration, inception, keyTag, signer] = parts;
+  const fmt = ts => {
+    // formato YYYYMMDDHHMMSS -> ISO
+    const s = ts;
+    return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)} ${s.slice(8,10)}:${s.slice(10,12)}:${s.slice(12,14)} UTC`;
+  };
+  return {
+    type_covered: typeCovered, algorithm: +algorithm, labels: +labels,
+    original_ttl: +originalTTL, expiration: expiration, inception: inception,
+    key_tag: +keyTag, signer: signer,
+    expiration_fmt: fmt(expiration), inception_fmt: fmt(inception),
+  };
+}
+
+function rrsigState(rrsig) {
+  const parseTs = ts => new Date(`${ts.slice(0,4)}-${ts.slice(4,6)}-${ts.slice(6,8)}T${ts.slice(8,10)}:${ts.slice(10,12)}:${ts.slice(12,14)}Z`);
+  const now = new Date();
+  const inc = parseTs(rrsig.inception), exp = parseTs(rrsig.expiration);
+  if (now < inc) return 'NO VÁLIDA AÚN (futura)';
+  if (now > exp) return 'EXPIRADA';
+  return 'VÁLIDA';
+}
+
+/**
+ * Analiza un dominio con el MISMO método que cripto_reto.py:
+ * DNSKEY, RRSIG (A+SOA), DS (recálculo criptográfico), NSEC/NSEC3/NSEC3PARAM.
+ * Todas las consultas DoH se lanzan en PARALELO para minimizar el tiempo total.
+ * Cada petición tiene un timeout individual de 6 s.
+ */
+
+// Wrapper DoH con timeout individual
+async function dohQueryTimed(name, type, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = `${DOH_ENDPOINT}?name=${encodeURIComponent(name)}&type=${type}&do=1&cd=1`;
+    const resp = await fetch(url, {
+      headers: { 'Accept': 'application/dns-json' },
+      signal: controller.signal
+    });
+    if (!resp.ok) throw new Error('DoH HTTP ' + resp.status);
+    return await resp.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function analyzeDomainLive(domain) {
+  const fqdn = domain.endsWith('.') ? domain : domain + '.';
+  const notas = [];
+
+  // ── Lanzar TODAS las consultas en paralelo ───────────────
+  const [rDNSKEY, rA, rSOA, rDS, rNSEC3P, rNSEC] = await Promise.allSettled([
+    dohQueryTimed(domain, 'DNSKEY'),
+    dohQueryTimed(domain, 'A'),
+    dohQueryTimed(domain, 'SOA'),
+    dohQueryTimed(domain, 'DS'),
+    dohQueryTimed(domain, 'NSEC3PARAM'),
+    dohQueryTimed(domain, 'NSEC'),
+  ]);
+
+  // ── DNSKEY ──────────────────────────────────────────────
+  let dnskeyData = [];
+  let dnskeyRaw = [];
+  if (rDNSKEY.status === 'fulfilled') {
+    try {
+      const answers = (rDNSKEY.value.Answer || []).filter(a => a.type === 48);
+      for (const a of answers) {
+        const [flagsS, protoS, algS, b64] = a.data.split(' ');
+        const flags = +flagsS, protocol = +protoS, algorithm = +algS;
+        const keyBytes = b64ToBytes(b64);
+        const keyTag = computeKeyTag(flags, protocol, algorithm, keyBytes);
+        const isSep = !!(flags & 1);
+        const isZone = !!(flags & 256);
+        const isRevoked = !!(flags & 128);
+        const [algName, algStatus] = DNSSEC_ALGORITHMS_JS[algorithm] || [`DESCONOCIDO(${algorithm})`,'UNKNOWN'];
+        const rfcOk = (algStatus==='MUST'||algStatus==='RECOMMENDED') && !isRevoked && isZone;
+        let estadoClave = 'VÁLIDA';
+        if (isRevoked) estadoClave = 'REVOCADA (RFC 5011)';
+        else if (!isZone) estadoClave = 'INVÁLIDA (Zone Key bit no activo)';
+        else if (algStatus==='MUST NOT') estadoClave = 'INVÁLIDA (algoritmo prohibido)';
+        else if (algStatus==='NOT RECOMMENDED') estadoClave = 'VÁLIDA pero algoritmo no recomendado';
+        dnskeyData.push({
+          domain, key_tag:keyTag, tipo: isSep?'KSK (SEP)':'ZSK', algoritmo:algName,
+          estado_alg:algStatus, estado_clave:estadoClave, rfc_compliant:rfcOk, ttl:a.TTL
+        });
+        dnskeyRaw.push({flags,protocol,algorithm,keyBytes,keyTag});
+      }
+    } catch(e) { notas.push('DNSKEY: error al procesar respuesta'); }
+  } else { notas.push('DNSKEY: timeout o error de red'); }
+
+  const hasDNSKEY = dnskeyData.length > 0;
+  const ksk = dnskeyData.filter(d=>d.tipo==='KSK (SEP)').length;
+  const zsk = dnskeyData.filter(d=>d.tipo==='ZSK').length;
+  const alg = hasDNSKEY ? [...new Set(dnskeyData.map(d=>d.algoritmo))].join(', ') : null;
+  const rfc8624 = hasDNSKEY ? dnskeyData.every(d=>d.rfc_compliant) : null;
+  const ttl = hasDNSKEY ? dnskeyData[0].ttl : null;
+
+  // ── RRSIG (A primero, SOA como fallback) ─────────────────
+  let rrsigData = null, adFlag = null, rrsigExp = null;
+  for (const [res, qtype] of [[rA,'A'],[rSOA,'SOA']]) {
+    if (res.status !== 'fulfilled') continue;
+    try {
+      adFlag = !!res.value.AD;
+      const sigs = (res.value.Answer || []).filter(a => a.type === 46)
+        .map(a => ({...parseRRSIGText(a.data), ttl:a.TTL}))
+        .filter(s => s.type_covered === qtype);
+      if (sigs.length) {
+        const s = sigs[0];
+        const [algName] = DNSSEC_ALGORITHMS_JS[s.algorithm] || [`ALG-${s.algorithm}`];
+        rrsigData = {
+          domain, tipo:qtype, key_tag:s.key_tag, algoritmo:algName, firmante:s.signer,
+          inicio:s.inception_fmt, expiracion:s.expiration_fmt, estado:rrsigState(s), ad_flag:adFlag
+        };
+        rrsigExp = rrsigData.expiracion;
+        break;
+      }
+    } catch(e) {}
+  }
+  const hasRRSIG = !!rrsigData;
+
+  // ── DS + verificación criptográfica de cadena ────────────
+  let dsData = [], chainOk = false, hasDS = false;
+  if (rDS.status === 'fulfilled') {
+    try {
+      const answers = (rDS.value.Answer || []).filter(a => a.type === 43);
+      hasDS = answers.length > 0;
+      let validCount = 0, brokenCount = 0;
+      // Compute all DS hashes in parallel
+      const dsVerifications = await Promise.allSettled(answers.map(async a => {
+        const [keyTagS, algS, digTypeS, digestHex] = a.data.split(' ');
+        const keyTag = +keyTagS, algorithm = +algS, digestType = +digTypeS;
+        const [algName] = DNSSEC_ALGORITHMS_JS[algorithm] || [`ALG-${algorithm}`];
+        const digestName = DS_DIGEST_NAMES_JS[digestType] || `TIPO-${digestType}`;
+        let chainValid = false;
+        const match = dnskeyRaw.find(k => k.keyTag === keyTag);
+        if (match) {
+          const computed = await computeDS(fqdn, match.flags, match.protocol, match.algorithm, match.keyBytes, digestType);
+          chainValid = computed === digestHex.replace(/\s+/g,'').toUpperCase();
+        }
+        return { keyTag, algName, digestName, digestType, chainValid };
+      }));
+      dsVerifications.forEach(r => {
+        if (r.status !== 'fulfilled') return;
+        const { keyTag, algName, digestName, digestType, chainValid } = r.value;
+        chainValid ? validCount++ : brokenCount++;
+        dsData.push({
+          domain, key_tag:keyTag, algoritmo:algName, digest:digestName,
+          cadena_valida:chainValid, digest_deprecado: digestType===1, cadena_integra:false
+        });
+      });
+      chainOk = hasDS && brokenCount===0 && validCount>0;
+      dsData.forEach(d => d.cadena_integra = chainOk);
+    } catch(e) { notas.push('DS: error al procesar respuesta'); }
+  } else { notas.push('DS: timeout o error de red'); }
+
+  // ── NSEC / NSEC3 / NSEC3PARAM ────────────────────────────
+  let nsecData = null, nsecTipo = 'NINGUNO';
+  const digest = dsData.length ? [...new Set(dsData.map(d=>d.digest))].join(', ') : null;
+
+  if (rNSEC3P.status === 'fulfilled') {
+    try {
+      const p = (rNSEC3P.value.Answer||[]).find(a=>a.type===51);
+      if (p) {
+        const [,,iterations] = p.data.split(' ');
+        nsecTipo = 'NSEC3PARAM+NSEC3';
+        nsecData = {domain, tipo:nsecTipo, usa_nsec3:true, usa_nsec:false, encontrado:true, ttl:p.TTL, iteraciones:+iterations};
+      }
+    } catch(e) {}
+  }
+  if (!nsecData && rNSEC.status === 'fulfilled') {
+    try {
+      const n = (rNSEC.value.Answer||[]).find(a=>a.type===47);
+      if (n) {
+        nsecTipo = 'NSEC';
+        nsecData = {domain, tipo:nsecTipo, usa_nsec3:false, usa_nsec:true, encontrado:true, ttl:n.TTL};
+      } else if (hasDNSKEY) {
+        nsecTipo = 'NO DETERMINADO';
+      }
+    } catch(e) {}
+  }
+
+  // ── Estado global ─────────────────────────────────────────
+  let status;
+  if (chainOk) status = 'ok';
+  else if (hasDNSKEY) status = 'partial';
+  else status = 'none';
+
+  return {
+    domain, hasDNSKEY, hasRRSIG, hasDS, chainOk, ksk, zsk, alg, rfc8624, ttl, adFlag,
+    rrsigExp, nsecTipo, digest, status, isNew:true,
+    notas: notas.join(' '),
+    rrsigData, dnskeyData, dsData, nsecData
+  };
+}
+
+// ══════════════════════════════════════════════════
+// DOMAIN ANALYSIS
+// ══════════════════════════════════════════════════
+
+async function analyzeDomain() {
+  const raw = document.getElementById('domain-input').value.trim().toLowerCase().replace(/\.+$/,'');
+  if (!raw) return;
+
+  const btn = document.getElementById('btn-analyze');
+  btn.disabled = true;
+  btn.textContent = 'Analizando…';
+  document.getElementById('lookup-result').innerHTML = `
+    <div class="loading-box"><div class="spinner"></div><p>Consultando DNSSEC para <strong>${raw}</strong>…</p></div>`;
+
+  addToRecent(raw);
+
+  // Check if known domain
+  if (DOMAIN_SUMMARIES[raw]) {
+    renderLookupResult(DOMAIN_SUMMARIES[raw], false);
+    btn.disabled = false; btn.textContent = 'Analizar'; return;
+  }
+  // Check if already in custom
+  if (customDomains[raw]) {
+    renderLookupResult(customDomains[raw], false);
+    btn.disabled = false; btn.textContent = 'Analizar'; return;
+  }
+
+  // Nuevo dominio — análisis en vivo vía DNS-over-HTTPS (mismo método: RFC 4033-4035, 8624)
+  try {
+    const parsed = await analyzeDomainLive(raw);
+    customDomains[raw] = parsed;
+    await saveCustomDomains();
+    renderTable();
+    renderLookupResult(parsed, true);
+  } catch(err) {
+    const fb = fallbackDomain(raw);
+    fb.notas = 'Error de conexión con DNS-over-HTTPS (Cloudflare). No se pudo completar el análisis en vivo.';
+    customDomains[raw] = fb;
+    await saveCustomDomains();
+    document.getElementById('lookup-result').innerHTML =
+      `<div class="error-box">Error de conexión vía DNS-over-HTTPS. Se guardó un resultado vacío para <strong>${raw}</strong>.</div>`;
+    renderLookupResult(fb, true);
+  }
+  btn.disabled = false; btn.textContent = 'Analizar';
+}
+
+function fallbackDomain(domain) {
+  return {domain, hasDNSKEY:false, hasRRSIG:false, hasDS:false, chainOk:false,
+    ksk:0, zsk:0, alg:null, rfc8624:null, ttl:null, adFlag:null, rrsigExp:null,
+    nsecTipo:'NINGUNO', digest:null, status:'none', isNew:true, notas:'Datos no disponibles sin conexión.',
+    dnskeyData:[], rrsigData:null, dsData:[], nsecData:null};
+}
+
+function renderLookupResult(s, isNewDomain) {
+  const statusMap = {
+    ok:   {cls:'pill-ok',   txt:'DNSSEC OK',            color:'var(--ok)'},
+    partial:{cls:'pill-warn', txt:'Cadena incompleta',   color:'var(--warn)'},
+    none: {cls:'pill-none', txt:'Sin DNSSEC',             color:'var(--none)'}
+  };
+  const st = statusMap[s.status] || statusMap.none;
+
+  const bool = (v, yes='Si', no='No') => v===true
+    ? `<span style="color:var(--ok)">${yes}</span>`
+    : v===false ? `<span style="color:var(--bad)">${no}</span>`
+    : `<span style="color:var(--none)">—</span>`;
+
+  const rrsigRows = s.rrsigData ? `
+    <table class="mini-table">
+      <thead><tr><th>Tipo</th><th>KeyTag</th><th>Algoritmo</th><th>Firmante</th><th>Inicio</th><th>Expiración</th><th>Estado</th><th>AD Flag</th></tr></thead>
+      <tbody><tr>
+        <td>${s.rrsigData.tipo||'—'}</td>
+        <td class="mono">${s.rrsigData.key_tag||'—'}</td>
+        <td>${s.rrsigData.algoritmo||'—'}</td>
+        <td class="mono">${s.rrsigData.firmante||'—'}</td>
+        <td class="mono" style="font-size:11px">${s.rrsigData.inicio||'—'}</td>
+        <td class="mono" style="font-size:11px">${s.rrsigData.expiracion||'—'}</td>
+        <td><span class="pill ${s.rrsigData.estado==='VÁLIDA'?'pill-ok':'pill-bad'}">${s.rrsigData.estado||'—'}</span></td>
+        <td>${bool(s.rrsigData.ad_flag)}</td>
+      </tr></tbody>
+    </table>` : '<p style="font-size:12px;color:var(--none)">Sin registros RRSIG encontrados.</p>';
+
+  const dnskeyRows = s.dnskeyData && s.dnskeyData.length ? `
+    <table class="mini-table">
+      <thead><tr><th>KeyTag</th><th>Tipo</th><th>Algoritmo</th><th>Estado Alg.</th><th>Estado Clave</th><th>RFC 8624</th><th>TTL</th></tr></thead>
+      <tbody>${s.dnskeyData.map(k=>`<tr>
+        <td class="mono">${k.key_tag||'—'}</td>
+        <td>${k.tipo||'—'}</td>
+        <td>${k.algoritmo||'—'}</td>
+        <td><span class="pill ${k.estado_alg==='MUST'||k.estado_alg==='RECOMMENDED'?'pill-ok':'pill-warn'}">${k.estado_alg||'—'}</span></td>
+        <td>${k.estado_clave||'—'}</td>
+        <td>${bool(k.rfc_compliant)}</td>
+        <td class="mono">${k.ttl!==null&&k.ttl!==undefined?k.ttl+'s':'—'}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : '<p style="font-size:12px;color:var(--none)">Sin registros DNSKEY encontrados.</p>';
+
+  const dsRows = s.dsData && s.dsData.length ? `
+    <table class="mini-table">
+      <thead><tr><th>KeyTag</th><th>Algoritmo</th><th>Digest</th><th>Cadena válida</th><th>Digest deprecado</th></tr></thead>
+      <tbody>${s.dsData.map(d=>`<tr>
+        <td class="mono">${d.key_tag||'—'}</td>
+        <td>${d.algoritmo||'—'}</td>
+        <td>${d.digest||'—'}</td>
+        <td>${bool(d.cadena_valida)}</td>
+        <td>${bool(d.digest_deprecado,'Si (SHA-1)','No')}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : '<p style="font-size:12px;color:var(--none)">Sin registros DS encontrados.</p>';
+
+  const nsecInfo = s.nsecData
+    ? `<span class="pill pill-ok">${s.nsecData.tipo}</span> TTL: ${s.nsecData.ttl!==null&&s.nsecData.ttl!==undefined?s.nsecData.ttl+'s':'—'} ${s.nsecData.usa_nsec3?'· <span class="pill pill-ok">NSEC3</span>':''} ${s.nsecData.usa_nsec?'· <span class="pill pill-warn">NSEC (enumeración posible)</span>':''}`
+    : '<span class="pill pill-none">Sin NSEC/NSEC3</span>';
+
+  const miniTree = buildMiniTreeSVG(s.domain, s.status);
+
+  document.getElementById('lookup-result').innerHTML = `
+    ${isNewDomain ? `<div class="info-box">Nuevo dominio analizado en vivo (DNS-over-HTTPS) y guardado en tu lista. ${s.notas?'<br><strong>Nota:</strong> '+s.notas:''}</div>` : ''}
+    ${s.notas && !isNewDomain ? `<div class="warn-box">${s.notas}</div>` : ''}
+
+    <div class="result-card">
+      <div class="result-header">
+        <span class="domain-title">${s.domain}</span>
+        <span class="pill ${st.cls} status-badge">${st.txt}</span>
+        ${s.isNew ? '<span class="pill pill-warn">Nuevo dominio</span>' : ''}
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-item"><div class="m-label">DNSKEY</div><div class="m-val">${bool(s.hasDNSKEY,'Presente','Ausente')}</div></div>
+        <div class="metric-item"><div class="m-label">KSK / ZSK</div><div class="m-val">${s.hasDNSKEY ? s.ksk+' / '+s.zsk : '—'}</div></div>
+        <div class="metric-item"><div class="m-label">Algoritmo</div><div class="m-val" style="font-size:12px">${s.alg||'—'}</div></div>
+        <div class="metric-item"><div class="m-label">RFC 8624</div><div class="m-val">${bool(s.rfc8624,'Cumple','No cumple')}</div></div>
+        <div class="metric-item"><div class="m-label">RRSIG</div><div class="m-val">${bool(s.hasRRSIG,'Válida','Ausente')}</div></div>
+        <div class="metric-item"><div class="m-label">AD Flag</div><div class="m-val">${bool(s.adFlag)}</div></div>
+        <div class="metric-item"><div class="m-label">DS / Cadena íntegra</div><div class="m-val">${bool(s.chainOk,'Íntegra','Rota o ausente')}</div></div>
+        <div class="metric-item"><div class="m-label">NSEC/NSEC3</div><div class="m-val" style="font-size:12px">${s.nsecTipo||'NINGUNO'}</div></div>
+        <div class="metric-item"><div class="m-label">TTL DNSKEY</div><div class="m-val">${s.ttl!==null&&s.ttl!==undefined?s.ttl+'s':'—'}</div></div>
+      </div>
+    </div>
+
+    <div class="result-card">
+      <div class="section-title">Árbol de cadena de confianza</div>
+      <div class="tree-container">${miniTree}</div>
+      <div class="tree-legend">
+        <span><span class="dot" style="background:var(--accent)"></span>Raíz (.)</span>
+        <span><span class="dot" style="background:var(--ok)"></span>DNSSEC OK</span>
+        <span><span class="dot" style="background:var(--warn)"></span>Incompleta</span>
+        <span><span class="dot" style="background:var(--none)"></span>Sin DNSSEC</span>
+      </div>
+    </div>
+
+    <div class="result-card">
+      <div class="section-title">Registros DNSKEY</div>
+      <div class="detail-section">${dnskeyRows}</div>
+      <div class="section-title">Registros RRSIG</div>
+      <div class="detail-section">${rrsigRows}</div>
+      <div class="section-title">Registros DS — Cadena de confianza</div>
+      <div class="detail-section">${dsRows}</div>
+      <div class="section-title">NSEC / NSEC3</div>
+      <div class="detail-section" style="font-size:13px;padding:8px 0">${nsecInfo}</div>
+    </div>
+  `;
+}
+
+function buildMiniTreeSVG(domain, status) {
+  const colors = { ok:'#36b37e', partial:'#ffab00', none:'#5a6478', root:'#5b8def' };
+  const parts = domain.split('.').filter(Boolean);
+  const nodes = [{ name:'.', color: colors.root }];
+  if (parts.length >= 1) nodes.push({ name: parts[parts.length-1]+'.', color: colors.ok });
+  if (parts.length >= 2) nodes.push({ name: parts.slice(-2).join('.')+'.', color: colors[status]||colors.none });
+  if (parts.length >= 3) nodes.push({ name: domain+'.', color: colors[status]||colors.none });
+
+  const h = nodes.length * 70 + 20;
+  const cx = 340;
+  let svg = `<svg viewBox="0 0 680 ${h}" width="100%" style="background:var(--panel)">
+    <defs><marker id="ma2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker></defs>`;
+  nodes.forEach((n,i) => {
+    const y = i * 70 + 30;
+    if (i > 0) {
+      const py = (i-1)*70+30;
+      svg += `<line x1="${cx}" y1="${py+13}" x2="${cx}" y2="${y-13}" stroke="#2a3650" stroke-width="1.2" marker-end="url(#ma2)"/>`;
+    }
+    svg += `<circle cx="${cx}" cy="${y}" r="13" fill="${n.color}" opacity="0.9"/>
+      <text x="${cx}" y="${y+26}" text-anchor="middle" font-size="11" fill="#8b97b3" font-family="monospace">${n.name}</text>`;
+  });
+  svg += '</svg>';
+  return svg;
+}
+
+// ══════════════════════════════════════════════════
+// TABLE VIEW
+// ══════════════════════════════════════════════════
+
+function getAllDomainSummaries() {
+  const res = {};
+  ALL_DOMAINS_LIST.forEach(d => { res[d] = DOMAIN_SUMMARIES[d]; });
+  Object.assign(res, customDomains);
+  return res;
+}
+
+function getTableRows() {
+  return Object.values(getAllDomainSummaries());
+}
+
+function renderTable() {
+  const tbody = document.getElementById('main-tbody');
+  if (!tbody) return;
+  const q = (document.getElementById('table-search')?.value||'').toLowerCase();
+  const filter = document.getElementById('table-filter')?.value || 'all';
+  let rows = getTableRows();
+  if (q) rows = rows.filter(r => r.domain.includes(q));
+  if (filter==='ok') rows = rows.filter(r=>r.status==='ok');
+  else if (filter==='partial') rows = rows.filter(r=>r.status==='partial');
+  else if (filter==='none') rows = rows.filter(r=>r.status==='none');
+  else if (filter==='new') rows = rows.filter(r=>r.isNew);
+
+  document.getElementById('domain-count').textContent = `(${rows.length} dominios)`;
+
+  const pill = (v, yt, nt) => v===true
+    ? `<span class="pill pill-ok">${yt}</span>`
+    : v===false ? `<span class="pill pill-bad">${nt}</span>`
+    : `<span style="color:var(--none);font-size:11px">—</span>`;
+
+  tbody.innerHTML = rows.map(s => {
+    const st = {ok:'pill-ok',partial:'pill-warn',none:'pill-none'}[s.status]||'pill-none';
+    const stTxt = {ok:'OK',partial:'Parcial',none:'Sin DNSSEC'}[s.status]||'—';
+    return `<tr data-status="${s.status}" data-new="${s.isNew||false}">
+      <td class="mono" style="font-weight:600">${s.domain}${s.isNew?'<sup style="color:var(--warn);font-size:9px;margin-left:3px">NEW</sup>':''}</td>
+      <td><span class="pill ${st}">${stTxt}</span></td>
+      <td>${pill(s.hasDNSKEY,'Sí','No')}</td>
+      <td>${s.ksk||'—'}</td>
+      <td>${s.zsk||'—'}</td>
+      <td style="font-size:11px">${s.alg||'—'}</td>
+      <td>${pill(s.rfc8624,'Si','No')}</td>
+      <td>${pill(s.hasRRSIG,'Sí','No')}</td>
+      <td style="font-size:11px;color:var(--muted)">${s.rrsigExp||'—'}</td>
+      <td>${pill(s.chainOk,'Íntegra','No')}</td>
+      <td style="font-size:11px">${s.digest||'—'}</td>
+      <td style="font-size:11px">${s.nsecTipo||'—'}</td>
+      <td style="font-size:11px">${s.ttl!==null&&s.ttl!==undefined?s.ttl+'s':'—'}</td>
+      <td>${pill(s.adFlag,'Si','No')}</td>
+      <td style="font-size:10px;color:var(--muted)">${s.isNew?'En vivo':'Estudio'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function filterTable() { renderTable(); }
+
+// ══════════════════════════════════════════════════
+// DASHBOARD CHARTS
+// ══════════════════════════════════════════════════
+
+const PAL = ['#36b37e','#f25c54','#ffab00','#5b8def','#9b8cf2','#5a6478','#36c5d9'];
+const SECTOR_COLORS = {
+  'Gobierno':'#5b8def',
+  'Educación':'#36b37e',
+  'Industria':'#f25c54',
+  'Comercio':'#ffab00',
+  'Finanzas':'#9b8cf2',
+  'Telecomunicaciones':'#36c5d9',
+  'Organizaciones civiles':'#f97b6b',
+  'Otro / nuevo':'#5a6478'
+};
+
+function computeSectorStats() {
+  const allSummaries = Object.values(getAllDomainSummaries());
+  const stats = {};
+  SECTOR_ORDER.forEach(s => { stats[s] = {total:0, ok:0, partial:0, none:0, dnskey:0}; });
+  stats['Otro / nuevo'] = {total:0, ok:0, partial:0, none:0, dnskey:0};
+  allSummaries.forEach(d => {
+    const sec = getSector(d.domain);
+    if (!stats[sec]) stats[sec] = {total:0, ok:0, partial:0, none:0, dnskey:0};
+    stats[sec].total++;
+    stats[sec][d.status]++;
+    if (d.hasDNSKEY) stats[sec].dnskey++;
+  });
+  return stats;
+}
+
+function donut(id, legId, labels, values, colors) {
+  const ctx = document.getElementById(id);
+  if (!ctx) return;
+  new Chart(ctx, {
+    type:'doughnut',
+    data:{labels, datasets:[{data:values,backgroundColor:colors||PAL,borderColor:'#0d1117',borderWidth:2,hoverOffset:4}]},
+    options:{cutout:'62%',responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{
+        const t=c.dataset.data.reduce((a,b)=>a+b,0)||1;
+        return ` ${c.label}: ${c.raw} (${(c.raw/t*100).toFixed(1)}%)`;
+      }}}}}
+  });
+  const legEl = document.getElementById(legId);
+  if (!legEl) return;
+  const total = values.reduce((a,b)=>a+b,0)||1;
+  legEl.innerHTML = labels.map((l,i)=>
+    `<div class="chart-legend-row"><span class="legend-dot" style="background:${(colors||PAL)[i]||PAL[i%PAL.length]}"></span>${l}: <strong>${values[i]}</strong> (${(values[i]/total*100).toFixed(1)}%)</div>`
+  ).join('');
+}
+
+function hbar(id, legId, labels, values) {
+  const ctx = document.getElementById(id);
+  if (!ctx) return;
+  new Chart(ctx,{type:'bar',
+    data:{labels,datasets:[{data:values,backgroundColor:PAL.slice(0,labels.length),borderRadius:4,borderSkipped:false}]},
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{x:{grid:{color:'#1e2940'},ticks:{color:'#8b97b3',font:{size:11}}},
+              y:{grid:{display:false},ticks:{color:'#8b97b3',font:{size:11}}}}}
+  });
+}
+
+function initDashboard() {
+  const s = SUMMARY;
+  const cards = [
+    {num:s.total,lbl:'Dominios analizados',cls:'c-accent'},
+    {num:s.with_dnskey,lbl:'Con DNSKEY',cls:'c-ok'},
+    {num:s.with_rrsig,lbl:'Con RRSIG válida',cls:'c-ok'},
+    {num:s.ds_chain_valid,lbl:'Cadena DS íntegra',cls:'c-ok'},
+    {num:s.use_nsec3,lbl:'Usan NSEC3',cls:'c-accent'},
+    {num:s.use_nsec_only,lbl:'Usan NSEC',cls:'c-warn'},
+    {num:s.rrsig_expired,lbl:'RRSIG expiradas',cls:'c-bad'},
+    {num:s.alg_authorized,lbl:'Algoritmos RFC 8624',cls:'c-ok'},
+    {num:s.alg_deprecated,lbl:'Algoritmos deprecados',cls:s.alg_deprecated>0?'c-bad':'c-ok'},
+  ];
+  document.getElementById('summary-cards').innerHTML = cards.map(c=>
+    `<div class="card"><div class="num ${c.cls}">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
+  ).join('');
+
+  donut('c-ds','leg-ds',['Cadena DS íntegra','Sin DS / cadena rota'],[s.ds_chain_valid,s.total-1-s.ds_chain_valid],['#36b37e','#f25c54']);
+  donut('c-dnskey','leg-dnskey',['Con DNSKEY','Sin DNSKEY'],[s.with_dnskey,s.total-s.with_dnskey],['#36b37e','#f25c54']);
+  donut('c-rrsig','leg-rrsig',['VÁLIDA','SIN RRSIG'],[s.with_rrsig,s.total-s.with_rrsig],['#36b37e','#f25c54']);
+  donut('c-nsec','leg-nsec',['NSEC3 (seguro)','NSEC (enumerable)','Sin NSEC/NSEC3'],[s.use_nsec3,s.use_nsec_only,s.total-s.use_nsec3-s.use_nsec_only],['#36b37e','#ffab00','#5a6478']);
+  donut('c-alg','leg-alg',['Autorizados RFC 8624','Deprecados/Prohibidos'],[s.alg_authorized,s.alg_deprecated],['#36b37e','#f25c54']);
+  hbar('c-algnames','leg-algnames',['RSASHA256','ECDSAP256SHA256','RSASHA512'],[13,7,2]);
+
+  // Sector stats
+  const sStats = computeSectorStats();
+  const secLabels = SECTOR_ORDER.filter(s => sStats[s] && sStats[s].total > 0);
+  const secColors = secLabels.map(s => SECTOR_COLORS[s]);
+
+  // Sector cards
+  const grid = document.getElementById('sector-stats-grid');
+  if (grid) {
+    grid.innerHTML = secLabels.map(sec => {
+      const st = sStats[sec];
+      const pct = st.total ? Math.round(st.ok / st.total * 100) : 0;
+      const pctDk = st.total ? Math.round(st.dnskey / st.total * 100) : 0;
+      const barColor = pct >= 50 ? 'var(--ok)' : pct > 0 ? 'var(--warn)' : 'var(--bad)';
+      return `<div style="background:var(--panel2);border-radius:8px;padding:14px 16px;border-left:3px solid ${SECTOR_COLORS[sec]}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="width:10px;height:10px;border-radius:2px;background:${SECTOR_COLORS[sec]};flex-shrink:0"></span>
+          <span style="font-size:13px;font-weight:700">${sec}</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:auto">${st.total} dominios</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <span class="pill pill-ok" style="font-size:10px">OK: ${st.ok}</span>
+          <span class="pill pill-warn" style="font-size:10px">Parcial: ${st.partial}</span>
+          <span class="pill pill-none" style="font-size:10px">Sin DNSSEC: ${st.none}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Cadena DS íntegra: <strong style="color:${barColor}">${pct}%</strong> · Con DNSKEY: <strong>${pctDk}%</strong></div>
+        <div style="background:var(--border);border-radius:99px;height:5px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${barColor};border-radius:99px;transition:width .4s"></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Sector bar chart — DS íntegra
+  const ctxSec = document.getElementById('c-sector-ds');
+  if (ctxSec) {
+    new Chart(ctxSec, {
+      type: 'bar',
+      data: {
+        labels: secLabels,
+        datasets: [
+          { label: 'DNSSEC OK', data: secLabels.map(s=>sStats[s].ok), backgroundColor: '#36b37e', borderRadius: 4 },
+          { label: 'Parcial', data: secLabels.map(s=>sStats[s].partial), backgroundColor: '#ffab00', borderRadius: 4 },
+          { label: 'Sin DNSSEC', data: secLabels.map(s=>sStats[s].none), backgroundColor: '#f25c54', borderRadius: 4 }
+        ]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { stacked: true, grid: { color: '#1e2940' }, ticks: { color: '#8b97b3', font: { size: 10 } } },
+          y: { stacked: true, grid: { display: false }, ticks: { color: '#8b97b3', font: { size: 10 } } }
+        },
+        plugins: { legend: { labels: { color: '#8b97b3', font: { size: 11 }, boxWidth: 12 } } }
+      }
+    });
+    const legEl = document.getElementById('leg-sector-ds');
+    if (legEl) legEl.innerHTML = `
+      <div class="chart-legend-row"><span class="legend-dot" style="background:#36b37e"></span>DNSSEC OK</div>
+      <div class="chart-legend-row"><span class="legend-dot" style="background:#ffab00"></span>Parcial</div>
+      <div class="chart-legend-row"><span class="legend-dot" style="background:#f25c54"></span>Sin DNSSEC</div>`;
+  }
+
+  // Sector donut — total domains
+  donut('c-sector-total','leg-sector-total', secLabels, secLabels.map(s=>sStats[s].total), secColors);
+}
+
+// ══════════════════════════════════════════════════
+// TRUST TREE — D3 (interactive domain selector)
+// ══════════════════════════════════════════════════
+
+// Domains currently selected for the tree
+let treeSelectedDomains = new Set();
+
+function initTreeDomainSelector() {
+  const allSummaries = getAllDomainSummaries();
+  // Default: select the 10 known DNSKEY domains + a few visible ones
+  const defaults = new Set([...dnskey_domains, 'uam.mx','ine.mx','tec.mx','sat.gob.mx','ipn.mx']);
+  treeSelectedDomains = new Set([...Object.keys(allSummaries)].filter(d => defaults.has(d)).slice(0, 18));
+  renderTreeDomainList();
+}
+
+function renderTreeDomainList() {
+  const allSummaries = getAllDomainSummaries();
+  const q = (document.getElementById('tree-domain-search')?.value||'').toLowerCase();
+  const secFilter = document.getElementById('tree-sector-filter')?.value || 'all';
+  const stFilter = document.getElementById('tree-status-filter')?.value || 'all';
+
+  let domains = Object.keys(allSummaries);
+  if (q) domains = domains.filter(d => d.includes(q));
+  if (secFilter !== 'all') domains = domains.filter(d => getSector(d) === secFilter);
+  if (stFilter !== 'all') domains = domains.filter(d => allSummaries[d].status === stFilter);
+
+  const statusColors = {ok:'var(--ok)',partial:'var(--warn)',none:'var(--none)'};
+  const statusIcons = {ok:'[ok]',partial:'[!]',none:'[-]'};
+
+  document.getElementById('tree-domain-list').innerHTML = domains.map(d => {
+    const s = allSummaries[d];
+    const checked = treeSelectedDomains.has(d);
+    const sc = SECTOR_COLORS[getSector(d)] || 'var(--none)';
+    return `<label style="display:flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;cursor:pointer;
+              background:${checked?'rgba(91,141,239,.12)':'var(--panel2)'};
+              border:1px solid ${checked?'rgba(91,141,239,.4)':'var(--border)'};
+              font-size:11px;color:var(--text);transition:all .1s;white-space:nowrap">
+      <input type="checkbox" ${checked?'checked':''} onchange="toggleTreeDomain('${d}',this.checked)"
+        style="accent-color:var(--accent);cursor:pointer"/>
+      <span style="color:${statusColors[s.status]}">${statusIcons[s.status]}</span>
+      <span>${d}</span>
+      <span style="width:6px;height:6px;border-radius:50%;background:${sc};flex-shrink:0" title="${getSector(d)}"></span>
+    </label>`;
+  }).join('');
+
+  const count = treeSelectedDomains.size;
+  document.getElementById('tree-selection-count').textContent = `${count} dominio${count===1?'':'s'} seleccionado${count===1?'':'s'} — haz clic en "Actualizar árbol" para aplicar`;
+}
+
+function toggleTreeDomain(domain, checked) {
+  if (checked) treeSelectedDomains.add(domain);
+  else treeSelectedDomains.delete(domain);
+  renderTreeDomainList();
+}
+
+function selectAllTreeDomains(select) {
+  const allSummaries = getAllDomainSummaries();
+  const q = (document.getElementById('tree-domain-search')?.value||'').toLowerCase();
+  const secFilter = document.getElementById('tree-sector-filter')?.value || 'all';
+  const stFilter = document.getElementById('tree-status-filter')?.value || 'all';
+  let domains = Object.keys(allSummaries);
+  if (q) domains = domains.filter(d => d.includes(q));
+  if (secFilter !== 'all') domains = domains.filter(d => getSector(d) === secFilter);
+  if (stFilter !== 'all') domains = domains.filter(d => allSummaries[d].status === stFilter);
+  if (select) domains.forEach(d => treeSelectedDomains.add(d));
+  else domains.forEach(d => treeSelectedDomains.delete(d));
+  renderTreeDomainList();
+}
+
+function filterTreeDomains() {
+  renderTreeDomainList();
+}
+
+function rebuildTrustTree() {
+  // Clear and redraw
+  d3.select('#trust-tree-svg').selectAll('*').remove();
+  drawTrustTree();
+}
+
+function initTrustTree() {
+  initTreeDomainSelector();
+  drawTrustTree();
+}
+
+function buildTreeDataFromSelected() {
+  const allSummaries = getAllDomainSummaries();
+  const colors = {root:'#5b8def', ok:'#36b37e', partial:'#ffab00', none:'#5a6478'};
+
+  // Group selected domains by TLD and second-level
+  const selected = [...treeSelectedDomains];
+
+  // Build hierarchy: root → tld → 2LD → 3LD
+  // We'll use a map to avoid duplication
+  const rootNode = { name:'.', status:'root', children: [] };
+
+  const tldMap = {}; // tld → node
+  const s2Map = {}; // 2LD → node
+
+  selected.forEach(domain => {
+    const parts = domain.split('.').filter(Boolean);
+    if (parts.length === 0) return;
+    const summary = allSummaries[domain] || {};
+    const status = summary.status || 'none';
+
+    if (parts.length === 1) {
+      // TLD itself (e.g. "mx")
+      const tldName = parts[0]+'.';
+      if (!tldMap[tldName]) {
+        const n = {name:tldName, status:'ok', ksk:1, zsk:1, dnskey_ttl:86400, ds_ttl:86400, children:[]};
+        tldMap[tldName] = n; rootNode.children.push(n);
+      }
+      return;
+    }
+
+    const tldName = parts[parts.length-1]+'.';
+    // Ensure TLD node exists
+    if (!tldMap[tldName]) {
+      const n = {name:tldName, status:'ok', ksk:1, zsk:1, dnskey_ttl:86400, ds_ttl:86400, children:[]};
+      tldMap[tldName] = n; rootNode.children.push(n);
+    }
+
+    if (parts.length === 2) {
+      // 2LD like unam.mx
+      const fqdn = domain+'.';
+      if (!s2Map[fqdn]) {
+        const n = {name:fqdn, status, ksk:summary.ksk||0, zsk:summary.zsk||0,
+          dnskey_ttl:summary.ttl, sector:getSector(domain), children:[]};
+        s2Map[fqdn] = n; tldMap[tldName].children.push(n);
+      }
+    } else if (parts.length >= 3) {
+      // 3LD+ like sat.gob.mx
+      const parent2LD = parts.slice(-2).join('.')+'.';
+      // Ensure 2LD node
+      if (!s2Map[parent2LD]) {
+        const parent2LDDomain = parts.slice(-2).join('.');
+        const pSum = allSummaries[parent2LDDomain] || {};
+        const n = {name:parent2LD, status:pSum.status||'none', ksk:pSum.ksk||0, zsk:pSum.zsk||0,
+          dnskey_ttl:pSum.ttl, sector:getSector(parent2LDDomain), children:[]};
+        s2Map[parent2LD] = n; tldMap[tldName].children.push(n);
+      }
+      const fqdn = domain+'.';
+      const n = {name:fqdn, status, ksk:summary.ksk||0, zsk:summary.zsk||0,
+        dnskey_ttl:summary.ttl, sector:getSector(domain)};
+      if (!s2Map[parent2LD].children) s2Map[parent2LD].children = [];
+      s2Map[parent2LD].children.push(n);
+    }
+  });
+
+  // Prune empty children arrays
+  const prune = node => {
+    if (node.children && node.children.length === 0) delete node.children;
+    else if (node.children) node.children.forEach(prune);
+  };
+  prune(rootNode);
+  return rootNode;
+}
+
+function drawTrustTree() {
+  const allSummaries = getAllDomainSummaries();
+  const colors = {root:'#5b8def', ok:'#36b37e', partial:'#ffab00', warn:'#ffab00', none:'#5a6478'};
+
+  if (treeSelectedDomains.size === 0) {
+    document.getElementById('tree-container').innerHTML =
+      '<div class="loading-box"><p>Selecciona al menos un dominio para visualizar el árbol.</p></div>';
+    document.getElementById('tree-container').appendChild(
+      Object.assign(document.createElementNS('http://www.w3.org/2000/svg','svg'), {id:'trust-tree-svg'}));
+    return;
+  }
+
+  const treeData = buildTreeDataFromSelected();
+
+  // Vertical layout: root at top, leaves at bottom
+  const margin = {top:50, right:30, bottom:60, left:30};
+  // Width scales with number of leaf nodes
+  const leafCount = Math.max(treeSelectedDomains.size, 8);
+  const width = Math.max(900, leafCount * 90);
+  const depth = 4; // root, tld, 2LD, 3LD
+  const height = depth * 120 + margin.top + margin.bottom;
+
+  const svg = d3.select('#trust-tree-svg')
+    .attr('width', width).attr('height', height)
+    .style('background','var(--panel)');
+
+  const g = svg.append('g').attr('transform',`translate(${margin.left},${margin.top})`);
+
+  const root = d3.hierarchy(treeData);
+  // d3.tree in vertical: x = horizontal spread, y = depth
+  const treeLayout = d3.tree()
+    .size([width - margin.left - margin.right, height - margin.top - margin.bottom])
+    .separation((a, b) => (a.parent === b.parent ? 1 : 1.4));
+  treeLayout(root);
+
+  // Links: vertical path (x is horizontal, y is vertical depth)
+  g.selectAll('.link').data(root.links()).join('path')
+    .attr('class','link')
+    .attr('d', d3.linkVertical().x(d => d.x).y(d => d.y));
+
+  const node = g.selectAll('.node').data(root.descendants()).join('g')
+    .attr('class','node').attr('transform', d => `translate(${d.x},${d.y})`);
+
+  node.append('circle').attr('r', 9)
+    .attr('fill', d => colors[d.data.status] || '#5a6478')
+    .attr('stroke', '#0d1117').attr('stroke-width', 1.5)
+    .on('mouseover', (event, d) => {
+      const t = document.getElementById('tooltip');
+      const sum = allSummaries[d.data.name.replace(/\.$/,'')];
+      let html = `<strong>${d.data.name}</strong><br>Estado: ${d.data.status}`;
+      if (d.data.ksk || d.data.zsk) html += `<br>KSK: ${d.data.ksk} · ZSK: ${d.data.zsk}`;
+      if (d.data.dnskey_ttl) html += `<br>TTL DNSKEY: ${d.data.dnskey_ttl}s`;
+      if (d.data.sector) html += `<br>Sector: ${d.data.sector}`;
+      if (sum) {
+        if (sum.alg) html += `<br>Algoritmo: ${sum.alg}`;
+        html += `<br>DS íntegra: ${sum.chainOk ? 'Si' : 'No'}`;
+      }
+      t.innerHTML = html; t.style.display = 'block';
+      t.style.left = (event.clientX+12)+'px'; t.style.top = (event.clientY-8)+'px';
+    })
+    .on('mousemove', event => {
+      const t = document.getElementById('tooltip');
+      t.style.left = (event.clientX+12)+'px'; t.style.top = (event.clientY-8)+'px';
+    })
+    .on('mouseout', () => { document.getElementById('tooltip').style.display = 'none'; });
+
+  // Colored sector dot for leaf nodes
+  node.filter(d => !d.children && d.data.sector).append('circle')
+    .attr('r', 3).attr('cx', 12).attr('cy', -10)
+    .attr('fill', d => SECTOR_COLORS[d.data.sector] || 'var(--none)')
+    .attr('opacity', 0.9);
+
+  // Labels: above node for internal, below for leaves
+  node.append('text')
+    .attr('dy', d => d.children ? '-1.4em' : '1.9em')
+    .attr('text-anchor', 'middle')
+    .text(d => d.data.name)
+    .style('font-size', d => d.depth === 0 ? '13px' : '10px')
+    .style('fill', 'var(--text)')
+    .style('font-family', 'monospace');
+}
+
+// ══════════════════════════════════════════════════
+// CSV EXPORT
+// ══════════════════════════════════════════════════
+
+function toCSV(headers, rows) {
+  const esc = v => {
+    if (v===null||v===undefined) return '';
+    const s = String(v);
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? '"'+s.replace(/"/g,'""')+'"' : s;
+  };
+  return [headers.join(','), ...rows.map(r=>r.map(esc).join(','))].join('\n');
+}
+
+function downloadCSV(filename, content) {
+  const blob = new Blob(['\uFEFF'+content], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV(type) {
+  const allSummaries = Object.values(getAllDomainSummaries());
+  let content = '';
+  const ts = new Date().toISOString().slice(0,19).replace('T',' ')+' UTC';
+
+  if (type==='summary' || type==='all') {
+    const s = SUMMARY;
+    const h = ['metrica','valor'];
+    const rows = [
+      ['Timestamp exportación', ts],
+      ['Dominios analizados', s.total + Object.keys(customDomains).length],
+      ['Dominios estudio original', s.total],
+      ['Dominios nuevos agregados', Object.keys(customDomains).length],
+      ['Con DNSKEY', s.with_dnskey],
+      ['Con RRSIG válido', s.with_rrsig],
+      ['Cadena DS íntegra', s.ds_chain_valid],
+      ['Usan NSEC3 (seguro)', s.use_nsec3],
+      ['Usan NSEC (enumeración)', s.use_nsec_only],
+      ['RRSIG expiradas', s.rrsig_expired],
+      ['Algoritmos autorizados RFC 8624', s.alg_authorized],
+      ['Algoritmos deprecados/prohibidos', s.alg_deprecated],
+      ['% Con DNSSEC completo', ((s.ds_chain_valid/(s.total-1))*100).toFixed(1)+'%'],
+      ['% Sin DNSSEC', (((s.total-s.with_dnskey)/s.total)*100).toFixed(1)+'%'],
+    ];
+    if (type==='summary') { downloadCSV('metricas_globales.csv', toCSV(h,rows)); return; }
+    content += '=== MÉTRICAS GLOBALES ===\n'+toCSV(h,rows)+'\n\n';
+  }
+
+  if (type==='dnskey' || type==='all') {
+    const h = ['dominio','key_tag','tipo','algoritmo','estado_algoritmo','estado_clave','rfc_compliant','ttl_s','origen'];
+    const rows = [];
+    // Known domains
+    DNSKEY_DATA.forEach(d => rows.push([d.domain,d.key_tag,d.tipo,d.algoritmo,d.estado_alg,d.estado_clave,d.rfc_compliant,d.ttl,'estudio']));
+    // Domains without dnskey in study
+    ALL_DOMAINS_LIST.filter(d=>!dnskey_domains.has(d)).forEach(d=>rows.push([d,'','','','','SIN DNSKEY',false,'','estudio']));
+    // Custom domains
+    Object.values(customDomains).forEach(s=>{
+      if(s.dnskeyData&&s.dnskeyData.length) s.dnskeyData.forEach(k=>rows.push([s.domain,k.key_tag||'',k.tipo||'',k.algoritmo||'',k.estado_alg||'',k.estado_clave||'',k.rfc_compliant,k.ttl||'','nuevo/en vivo']));
+      else rows.push([s.domain,'','','','','SIN DNSKEY',false,'','nuevo/en vivo']);
+    });
+    if (type==='dnskey') { downloadCSV('dnskey.csv', toCSV(h,rows)); return; }
+    content += '=== REGISTROS DNSKEY ===\n'+toCSV(h,rows)+'\n\n';
+  }
+
+  if (type==='rrsig' || type==='all') {
+    const h = ['dominio','tipo_consultado','key_tag','algoritmo','firmante','inicio','expiracion','estado','ad_flag','origen'];
+    const rows = [];
+    RRSIG_DATA.forEach(r=>rows.push([r.domain,r.tipo,r.key_tag,r.algoritmo,r.firmante,r.inicio,r.expiracion,r.estado,r.ad_flag,'estudio']));
+    ALL_DOMAINS_LIST.filter(d=>!rrsig_domains.has(d)).forEach(d=>rows.push([d,'','','','','','','SIN RRSIG','','estudio']));
+    Object.values(customDomains).forEach(s=>{
+      if(s.rrsigData) rows.push([s.domain,s.rrsigData.tipo||'',s.rrsigData.key_tag||'',s.rrsigData.algoritmo||'',s.rrsigData.firmante||'',s.rrsigData.inicio||'',s.rrsigData.expiracion||'',s.rrsigData.estado||'',s.rrsigData.ad_flag,'nuevo/en vivo']);
+      else rows.push([s.domain,'','','','','','','SIN RRSIG','','nuevo/en vivo']);
+    });
+    if (type==='rrsig') { downloadCSV('rrsig.csv', toCSV(h,rows)); return; }
+    content += '=== REGISTROS RRSIG ===\n'+toCSV(h,rows)+'\n\n';
+  }
+
+  if (type==='ds' || type==='all') {
+    const h = ['dominio','key_tag','algoritmo','digest','cadena_valida','digest_deprecado','cadena_integra_global','notas','origen'];
+    const rows = [];
+    DS_DATA.forEach(d=>rows.push([d.domain,d.key_tag,d.algoritmo,d.digest,d.cadena_valida,d.digest_deprecado,d.cadena_integra,d.digest_deprecado?'SHA-1 deprecado RFC 8624':'','estudio']));
+    ALL_DOMAINS_LIST.filter(d=>!DS_DATA.some(r=>r.domain===d)).forEach(d=>rows.push([d,'','','','','',false,'Sin registros DS','estudio']));
+    Object.values(customDomains).forEach(s=>{
+      if(s.dsData&&s.dsData.length) s.dsData.forEach(d=>rows.push([s.domain,d.key_tag||'',d.algoritmo||'',d.digest||'',d.cadena_valida,false,s.chainOk,'','nuevo/en vivo']));
+      else rows.push([s.domain,'','','','','',false,'Sin DS','nuevo/en vivo']);
+    });
+    if (type==='ds') { downloadCSV('ds_cadena.csv', toCSV(h,rows)); return; }
+    content += '=== REGISTROS DS ===\n'+toCSV(h,rows)+'\n\n';
+  }
+
+  if (type==='nsec' || type==='all') {
+    const h = ['dominio','tipo','usa_nsec3','usa_nsec','encontrado','ttl_s','origen'];
+    const rows = [];
+    NSEC_DATA.forEach(n=>rows.push([n.domain,n.tipo,n.usa_nsec3,n.usa_nsec,n.encontrado,n.ttl,'estudio']));
+    ALL_DOMAINS_LIST.filter(d=>!NSEC_DATA.some(n=>n.domain===d)).forEach(d=>rows.push([d,'NINGUNO',false,false,false,'','estudio']));
+    Object.values(customDomains).forEach(s=>{
+      if(s.nsecData) rows.push([s.domain,s.nsecData.tipo,s.nsecData.usa_nsec3,s.nsecData.usa_nsec,s.nsecData.encontrado,'','nuevo/en vivo']);
+      else rows.push([s.domain,'NINGUNO',false,false,false,'','nuevo/en vivo']);
+    });
+    if (type==='nsec') { downloadCSV('nsec.csv', toCSV(h,rows)); return; }
+    content += '=== REGISTROS NSEC/NSEC3 ===\n'+toCSV(h,rows)+'\n\n';
+  }
+
+  if (type==='tree' || type==='all') {
+    const h = ['padre','hijo','tiene_dnskey','tiene_ds','cadena_ds_valida','ksk','zsk'];
+    const rows = TREE_DATA.map(t=>[t.padre,t.hijo,t.tiene_dnskey,t.tiene_ds,t.cadena_ds_valida,t.ksk,t.zsk]);
+    if (type==='tree') { downloadCSV('cadena_confianza.csv', toCSV(h,rows)); return; }
+    content += '=== CADENA DE CONFIANZA ===\n'+toCSV(h,rows)+'\n\n';
+  }
+
+  if (type==='all') {
+    content = `# Monitor DNSSEC — MA2002B · Tec de Monterrey\n# Exportado: ${ts}\n# RFC 4033-4035, 5155, 6840, 8624\n\n` + content;
+    downloadCSV('dnssec_completo.csv', content);
+  }
+}
+
+// ══════════════════════════════════════════════════
+// NAV
+// ══════════════════════════════════════════════════
+
+const VIEW_TITLES = {
+  lookup:'Consulta de dominio',
+  dashboard:'Dashboard global',
+  tree:'Árbol de cadena de confianza',
+  tabla:'Tabla de métricas',
+  exportar:'Exportar CSV'
+};
+let chartsInited = false;
+let treeInited = false;
+
+function showView(id, el) {
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+  document.getElementById('view-'+id).classList.add('active');
+  el.classList.add('active');
+  document.getElementById('topbar-title').textContent = VIEW_TITLES[id]||id;
+
+  if (id==='dashboard' && !chartsInited) { chartsInited=true; initDashboard(); }
+  if (id==='tree' && !treeInited) { treeInited=true; initTrustTree(); }
+  else if (id==='tree') { renderTreeDomainList(); }
+  if (id==='tabla') renderTable();
+}
+
+// ══════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════
+
+document.getElementById('domain-input').addEventListener('keydown', e=>{
+  if(e.key==='Enter') analyzeDomain();
+});
+document.getElementById('topbar-meta').textContent = `Generado: ${new Date().toISOString().slice(0,10)} · ${SUMMARY.total} dominios`;
+
+loadCustomDomains();
+renderTable();
+</script>
+</body>
+</html>
